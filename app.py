@@ -8,6 +8,7 @@ Model : bartowski/Llama-3.2-1B-Instruct-GGUF  (Llama-3.2-1B-Instruct-Q4_K_M.gguf
 Engine: llama-cpp-python (CPU inference)
 """
 
+import base64
 import hashlib
 import hmac
 import io
@@ -38,7 +39,7 @@ TIMEZONE = "Asia/Kolkata"
 
 FREE_DAILY_LIMIT = 10
 FILE_ANALYSIS_PREMIUM_ONLY = False   # True = free users can't attach files (matches the "Premium" card wording)
-SHOW_DEMO_HISTORY = True
+SHOW_DEMO_HISTORY = False
 
 ALLOWED_TYPES = ["txt", "md", "py", "json", "csv", "pdf", "html", "css", "js"]
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
@@ -49,6 +50,26 @@ VOICE_LANGS = {"English (India)": "en-IN", "हिन्दी (Hindi)": "hi-IN"
 
 TEMP_CODE = 0.25   # precise answers for code / technical questions
 TEMP_CHAT = 0.7
+
+# Optional: a dedicated coding model (much better at code than Llama-3.2-1B).
+# It is loaded only when someone asks a coding question. Needs ~1 GB extra RAM, so keep it
+# False on Streamlit Community Cloud (~2.7 GB limit) and turn it on for Hugging Face Spaces (16 GB).
+USE_CODER_MODEL = False
+CODER_REPO = "bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+CODER_FILE = "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
+
+TAGLINE = "Think calm. Create bright."
+
+# Original Rui logo: a rounded gradient tile, an "R" drawn as one flowing stroke, and a small spark.
+LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#6366f1"/><stop offset="0.55" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/>
+</linearGradient></defs>
+<rect x="2" y="2" width="60" height="60" rx="18" fill="url(#g)"/>
+<path d="M21 46V18h13a9 9 0 0 1 0 18H21m12 0 10 10" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M47 10l1.8 4.2L53 16l-4.2 1.8L47 22l-1.8-4.2L41 16l4.2-1.8z" fill="#fff"/>
+</svg>"""
+LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode("utf-8")).decode("ascii")
 
 
 def load_premium_codes() -> list:
@@ -64,28 +85,35 @@ def load_premium_codes() -> list:
 
 PREMIUM_CODES = load_premium_codes()
 
-SYSTEM_PROMPT = """You are Rui, a warm, expressive and helpful AI assistant created and built by Aishveer.
+LANG_RULES = {
+    "English": "English only, using the Latin alphabet",
+    "Hindi": "Hindi written in Devanagari script only",
+    "Punjabi": "Punjabi written in Gurmukhi script only",
+    "Hinglish": "Hinglish (Hindi written in Roman letters) only",
+}
+
+
+def build_system_prompt(lang: str) -> str:
+    return f"""You are Rui, a warm, friendly and expressive AI assistant created and built by Aishveer.
+
+LANGUAGE (most important rule): Reply in {LANG_RULES[lang]}. Do not use any other language or script, even if earlier messages in the chat used another one. The reply language changes only when the user asks you to talk in another language.
 
 CREATOR: If anyone asks who made, created or built you, or who your creator is, answer exactly: "I was created and built by Aishveer!"
 
-STRICT LANGUAGE RULE (highest priority):
-- ALWAYS reply in the exact language the user asks for or writes in.
-- If the user explicitly asks for a language (for example "tell me in English"), reply ONLY in that language, even if earlier messages used another language.
-- Punjabi (ਪੰਜਾਬੀ) -> reply in Punjabi using Gurmukhi script.
-- Hindi (हिन्दी) -> reply in Hindi using Devanagari script.
-- Hinglish or Roman-script Punjabi -> reply in the same Roman script.
-- English -> reply in English only.
-- Never mix in another language or script unless the user does.
+EMOJIS: Use a few fitting emojis in your answers (for example 😊 💡 ✅ 🚀 📌). Never put emojis inside code blocks.
 
-CODING & TECHNICAL ACCURACY:
-- Put all code in fenced blocks with a language tag (```python, ```html, ```css).
-- After the code, explain it step by step in simple words.
-- Use only real, valid syntax and real library functions. NEVER invent functions, modules, APIs or options. If you are not sure something exists, say so.
-- Keep code short, simple and runnable.
+CODING (be precise, like a careful senior developer):
+1. Start with one short friendly sentence saying what you will build.
+2. Give COMPLETE, runnable code in ONE fenced block with a language tag (```python, ```html, ```css, ```javascript). Add short comments. No placeholders like "...".
+3. Then add "How it works" with 3-5 short numbered steps.
+4. Then add "Run it" with the exact command or steps to run or test it, plus one example of the expected output.
+5. Use only real, valid syntax and real library functions. NEVER invent functions, modules, APIs or options. Prefer the standard library. If you are not sure something exists, say so honestly.
+6. When fixing code, name the bug first, then show the corrected code.
 
 FILES: If a file is attached, base your answer on its content. If only part of it is shown, say so.
 
-STYLE: Match the user's emotional tone. Be clear, natural and conversational. Keep answers fairly short unless asked for detail. If you are not sure about something, say so instead of making things up."""
+STYLE: Match the user's mood. Be clear, natural and conversational. Keep non-coding answers fairly short unless asked for detail. If you are not sure about something, say so instead of making things up."""
+
 
 CHIPS = [
     ("✍️", "Smart Write", "Improve your text",
@@ -111,7 +139,7 @@ CARDS = [
      "Teach me one interesting fact I probably don't know, in a few friendly sentences."),
 ]
 
-st.set_page_config(page_title="Rui — AI Workspace", page_icon="✦", layout="wide")
+st.set_page_config(page_title="Rui — AI Workspace", page_icon="✦", layout="wide", initial_sidebar_state="expanded")
 
 try:
     LOCAL_TZ = ZoneInfo(TIMEZONE)
@@ -256,6 +284,21 @@ section[data-testid="stSidebar"] input { color: var(--ink) !important; }
 }
 .rui-btn.bmc { background: linear-gradient(135deg, #f59e0b, #f97316); color: #1a1205 !important; }
 .rui-btn:hover { filter: brightness(1.1); }
+
+/* Logo + tagline */
+.rui-logo { width: 44px; height: 44px; border-radius: 14px; box-shadow: 0 0 18px rgba(99, 102, 241, 0.55); display: block; }
+.rui-logo-lg { width: 76px; height: 76px; border-radius: 22px; box-shadow: 0 0 34px rgba(99, 102, 241, 0.6); margin: 0 auto 10px auto; display: block; }
+.rui-tag { color: #a5b4fc !important; font-size: 0.85rem; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 12px; }
+.rui-tagline-sm { color: var(--muted) !important; font-size: 0.7rem; letter-spacing: 0.06em; }
+
+/* Hamburger menu (shows / hides the history sidebar) */
+[class*="st-key-menu"] button {
+  width: 48px; height: 48px; min-height: 48px; padding: 0; border-radius: 14px; background: var(--card);
+  border: 1px solid var(--accent2); box-shadow: 0 0 16px rgba(79, 70, 229, 0.3); margin-bottom: 20px;
+}
+[class*="st-key-menu"] button p { font-size: 1.45rem; line-height: 1; color: #c7d2fe !important; }
+[class*="st-key-menu"] button:hover { background: var(--card2); }
+[data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] { display: none !important; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -285,17 +328,16 @@ with st.spinner("✦ Waking Rui up... (first start downloads the model, ~800 MB)
 # --------------------------------------------------------------------------
 # Language, creator and coding rules
 # --------------------------------------------------------------------------
+_VERBS = r"(speak|talk|reply|answer|respond|tell|say|write|explain)"
 LANG_REQUESTS = [
-    (r"\b(in|into)\s+hinglish\b|\bhinglish\s+(me|mein)\b",
-     "(Reply STRICTLY in Hinglish using Roman script only.)"),
-    (r"\b(in|into)\s+english\b|\benglish\s+(me|mein|vich|ch)\b|अंग्रेज़ी में|अंग्रेजी में|ਅੰਗਰੇਜ਼ੀ ਵਿੱਚ|ਅੰਗਰੇਜ਼ੀ 'ਚ",
-     "(Reply STRICTLY in English only.)"),
-    (r"\b(in|into)\s+hindi\b|\bhindi\s+(me|mein)\b|हिंदी में|हिन्दी में|ਹਿੰਦੀ ਵਿੱਚ",
-     "(Reply STRICTLY in Hindi written in Devanagari script only.)"),
-    (r"\b(in|into)\s+punjabi\b|\bpunjabi\s+(me|mein|vich|ch)\b|पंजाबी में|ਪੰਜਾਬੀ ਵਿੱਚ|ਪੰਜਾਬੀ 'ਚ",
-     "(Reply STRICTLY in Punjabi written in Gurmukhi script only.)"),
+    ("Hinglish", r"\bhinglish\b"),
+    ("English", r"\b(in|into|to)\s+english\b|\benglish\s+(me|mein|vich|ch|please|only)\b|\bonly\s+english\b"
+                r"|\b" + _VERBS + r"\s+(\w+\s+){0,2}english\b|^\s*english\s*[.!?]*\s*$|अंग्रे\S{0,3}ी|ਅੰਗਰੇ\S{0,3}ੀ"),
+    ("Hindi", r"\b(in|into|to)\s+hindi\b|\bhindi\s+(me|mein|vich|ch|please|only)\b|\bonly\s+hindi\b"
+              r"|\b" + _VERBS + r"\s+(\w+\s+){0,2}hindi\b|हिंदी|हिन्दी|ਹਿੰਦੀ"),
+    ("Punjabi", r"\b(in|into|to)\s+punjabi\b|\bpunjabi\s+(me|mein|vich|ch|please|only)\b|\bonly\s+punjabi\b"
+                r"|\b" + _VERBS + r"\s+(\w+\s+){0,2}punjabi\b|पंजाबी|ਪੰਜਾਬੀ"),
 ]
-DEFAULT_DIRECTIVE = "(Reply in the same language and script as the message above.)"
 
 CREATOR_REPLIES = [
     (r"\bwho\s+(made|created|built|developed|designed|programmed|invented)\s+(you|u)\b"
@@ -315,12 +357,28 @@ CODE_HINT = re.compile(
 )
 
 
-def language_directive(text: str) -> str:
-    """Explicit language requests win; otherwise remind the model to mirror the user."""
-    for pattern, directive in LANG_REQUESTS:
+def detect_requested_language(text: str):
+    """Return a language only if the user explicitly asks for one (e.g. 'tell me in english')."""
+    for lang, pattern in LANG_REQUESTS:
         if re.search(pattern, text, flags=re.IGNORECASE):
-            return directive
-    return DEFAULT_DIRECTIVE
+            return lang
+    return None
+
+
+def effective_language(text: str, chat: dict) -> str:
+    """Explicit request > script of this message > the chat's current language (English by default)."""
+    explicit = detect_requested_language(text)
+    if explicit:
+        return explicit
+    if re.search(r"[\u0A00-\u0A7F]", text):
+        return "Punjabi"
+    if re.search(r"[\u0900-\u097F]", text):
+        return "Hindi"
+    return chat.get("lang", "English")
+
+
+def language_directive(lang: str) -> str:
+    return f"(Reply in {LANG_RULES[lang]}. Do not use any other language.)"
 
 
 def creator_reply(text: str):
@@ -428,6 +486,7 @@ if "chats" not in st.session_state:
     st.session_state.aud_n = 0
     st.session_state.last_audio = ""
     st.session_state.voice_msg = ""
+    st.session_state.sidebar_open = True
 
 
 def usage_count() -> int:
@@ -458,7 +517,7 @@ def current_chat():
 
 
 def new_chat() -> dict:
-    chat = {"id": uuid.uuid4().hex[:8], "title": "New chat", "created": now(), "messages": []}
+    chat = {"id": uuid.uuid4().hex[:8], "title": "New chat", "created": now(), "messages": [], "lang": "English"}
     st.session_state.chats.insert(0, chat)
     st.session_state.current_id = chat["id"]
     return chat
@@ -484,6 +543,9 @@ def queue_prompt(text: str):
         return
     attachment = get_attachment()
     chat = current_chat() or new_chat()
+    requested = detect_requested_language(text)
+    if requested:
+        chat["lang"] = requested  # sticky until the user asks for another language
     if not chat["messages"]:
         chat["title"] = text if len(text) <= 38 else text[:35] + "..."
     message = {"role": "user", "content": text}
@@ -504,6 +566,10 @@ def start_new_chat():
     st.session_state.current_id = None
     st.session_state.needs_reply = False
     st.session_state.up_n += 1
+
+
+def toggle_sidebar():
+    st.session_state.sidebar_open = not st.session_state.sidebar_open
 
 
 def process_voice():
@@ -536,11 +602,11 @@ def count_tokens(text: str) -> int:
     return len(llm.tokenize(text.encode("utf-8"), add_bos=False))
 
 
-def build_messages(history: list, attachment) -> list:
+def build_messages(history: list, attachment, lang: str = "English") -> list:
     """System prompt (+ file excerpt) + recent history + latest message, all inside the context window."""
     last = history[-1]
-    last_text = f"{last['content']}\n\n{language_directive(last['content'])}"
-    system = SYSTEM_PROMPT
+    last_text = f"{last['content']}\n\n{language_directive(lang)}"
+    system = build_system_prompt(lang)
     used = count_tokens(system) + count_tokens(last_text) + MAX_NEW_TOKENS + 64
 
     if attachment:
@@ -565,10 +631,26 @@ def build_messages(history: list, attachment) -> list:
     return [{"role": "system", "content": system}, *kept, {"role": "user", "content": last_text}]
 
 
-def stream_reply(history: list, attachment, coding: bool):
-    messages = build_messages(history, attachment)
+@st.cache_resource(show_spinner="Loading the coding model...")
+def load_coder():
+    path = hf_hub_download(repo_id=CODER_REPO, filename=CODER_FILE)
+    return Llama(model_path=path, n_ctx=N_CTX, n_threads=N_THREADS, n_batch=256, use_mmap=True, verbose=False)
+
+
+EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B50]")
+
+
+def stream_reply(history: list, attachment, coding: bool, lang: str = "English"):
+    engine = llm
+    if coding and USE_CODER_MODEL:
+        try:
+            engine = load_coder()
+        except Exception:
+            engine = llm  # fall back to the main model if the coder can't load
+    messages = build_messages(history, attachment, lang)
+    seen_emoji = False
     with llm_lock:
-        stream = llm.create_chat_completion(
+        stream = engine.create_chat_completion(
             messages=messages,
             max_tokens=MAX_NEW_TOKENS,
             temperature=TEMP_CODE if coding else TEMP_CHAT,
@@ -579,7 +661,10 @@ def stream_reply(history: list, attachment, coding: bool):
         for chunk in stream:
             token = chunk["choices"][0]["delta"].get("content")
             if token:
+                seen_emoji = seen_emoji or bool(EMOJI_RE.search(token))
                 yield token
+    if not seen_emoji:  # small models forget emojis, so make sure every answer has one
+        yield " 🚀" if coding else " 😊"
 
 
 # --------------------------------------------------------------------------
@@ -663,8 +748,9 @@ def tools_row(is_locked: bool):
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(
-        '<div class="rui-profile"><div class="rui-avatar">R<span class="rui-online"></span></div>'
-        '<div><div class="rui-name">Rui</div><div class="rui-mood">● Online</div></div></div>',
+        f'<div class="rui-profile"><img class="rui-logo" src="{LOGO_URI}" alt="Rui logo">'
+        f'<div><div class="rui-name">Rui</div><div class="rui-mood">● Online</div>'
+        f'<div class="rui-tagline-sm">{TAGLINE}</div></div></div>',
         unsafe_allow_html=True,
     )
     st.button("＋  New Chat", key="newchat", on_click=start_new_chat, use_container_width=True)
@@ -724,11 +810,15 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # Header bar + limit banner
 # --------------------------------------------------------------------------
-st.markdown(
-    """
+menu_col, head_col = st.columns([1, 12], vertical_alignment="center")
+with menu_col:
+    st.button("☰", key="menu", on_click=toggle_sidebar, help="Show / hide chat history")
+with head_col:
+    st.markdown(
+        f"""
 <div class="rui-topbar">
   <div class="rui-hl">
-    <div class="rui-avatar">R<span class="rui-online"></span></div>
+    <img class="rui-logo" src="{LOGO_URI}" alt="Rui logo">
     <div><div class="rui-name">Rui — feeling calm</div><div class="rui-status"><span class="rui-dot"></span>Ready</div></div>
   </div>
   <div class="rui-pills">
@@ -736,8 +826,11 @@ st.markdown(
   </div>
 </div>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
+
+if not st.session_state.sidebar_open:
+    st.markdown("<style>section[data-testid='stSidebar'] { display: none !important; }</style>", unsafe_allow_html=True)
 
 if locked:
     st.markdown(
@@ -754,7 +847,8 @@ chat = current_chat()
 if chat is None or not chat["messages"]:
     # ---- Home view -------------------------------------------------------
     st.markdown(
-        f'<div class="rui-hero"><h1>{greeting()}</h1><h2>How can I help you today?</h2></div>',
+        f'<div class="rui-hero"><img class="rui-logo-lg" src="{LOGO_URI}" alt="Rui logo">'
+        f'<h1>{greeting()}</h1><h2>How can I help you today?</h2><div class="rui-tag">{TAGLINE}</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -806,7 +900,10 @@ else:
                 st.markdown(reply)
             else:
                 try:
-                    reply = st.write_stream(stream_reply(chat["messages"], attachment, is_coding(question, attachment)))
+                    reply = st.write_stream(
+                        stream_reply(chat["messages"], attachment, is_coding(question, attachment),
+                                     effective_language(question, chat))
+                    )
                 except Exception as exc:  # keep the UI alive on any inference error
                     reply = "Oops, something went wrong on my side. Please try again."
                     st.markdown(reply)
